@@ -92,7 +92,8 @@
   }
   map.on('zoomend', refreshLabels);
 
-  // ---------- 图例（可点击缩放到线路） ----------
+  // ---------- 图例（可收起，点击线路缩放定位） ----------
+  const legendWrap = document.getElementById('legend-wrap');
   const legend = document.getElementById('legend');
   LINES.forEach(l=>{
     const s = document.createElement('span');
@@ -102,6 +103,9 @@
     });
     legend.appendChild(s);
   });
+  // 手机默认收起，桌面默认展开
+  if(window.innerWidth > 800) legendWrap.classList.add('open');
+  document.getElementById('legend-toggle').addEventListener('click', ()=> legendWrap.classList.toggle('open'));
 
   // ---------- 详情面板 ----------
   const panel=document.getElementById('panel'), pLines=document.getElementById('p-lines'),
