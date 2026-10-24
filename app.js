@@ -1,5 +1,14 @@
 // 北京地铁站名故事 · Leaflet 真实地图版
 (function(){
+  // ---------- 移动端视口高度兜底（应对地址栏导致的 100vh 偏大） ----------
+  function fitApp(){
+    document.getElementById('app').style.height = window.innerHeight + 'px';
+    if(window.__map) window.__map.invalidateSize();
+  }
+  window.addEventListener('resize', fitApp);
+  window.addEventListener('orientationchange', ()=> setTimeout(fitApp, 300));
+  fitApp();
+
   // ---------- WGS-84 -> GCJ-02（高德底图纠偏） ----------
   function wgs2gcj(lat, lng){
     const a = 6378245.0, ee = 0.00669342162296594323;
@@ -38,6 +47,7 @@
 
   // ---------- 地图初始化 ----------
   const map = L.map('map', {zoomControl:false, minZoom:9, maxZoom:17}).setView([39.905, 116.42], 11);
+  window.__map = map;
   L.control.zoom({position:'bottomright'}).addTo(map);
   L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
     subdomains:['1','2','3','4'], attribution:'© 高德地图 | 站点数据 © Wikidata (CC0)', maxZoom:17
