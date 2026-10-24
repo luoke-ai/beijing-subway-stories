@@ -45,8 +45,14 @@
   #suggestions .item:hover{background:var(--line)}
   #suggestions .item .l{color:var(--muted);font-size:11px;flex-shrink:0}
 
-  /* 图例 */
-  #legend{position:absolute;bottom:16px;left:12px;z-index:1000;background:#0e1220e6;border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:4px 12px;max-width:min(560px,60vw);font-size:11px;color:var(--muted)}
+  /* 图例（可收起） */
+  #legend-wrap{position:absolute;bottom:16px;left:12px;z-index:1000;max-width:min(560px,calc(100vw - 90px))}
+  #legend-toggle{background:#0e1220e6;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:6px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px}
+  #legend-toggle:hover{border-color:var(--accent)}
+  #legend-toggle .arrow{transition:.2s;display:inline-block;font-size:10px;color:var(--muted)}
+  #legend-wrap.open #legend-toggle .arrow{transform:rotate(180deg)}
+  #legend{display:none;background:#0e1220e6;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:6px;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--muted);max-height:34vh;overflow-y:auto}
+  #legend-wrap.open #legend{display:flex}
   #legend span{display:flex;align-items:center;gap:5px;cursor:pointer;border-radius:4px;padding:1px 4px}
   #legend span:hover{background:var(--line);color:var(--text)}
   #legend i{width:14px;height:4px;border-radius:2px;display:inline-block;flex-shrink:0}
@@ -83,7 +89,10 @@
       <input id="search" placeholder="搜索站点名…" autocomplete="off">
     </div>
     <div id="suggestions"></div>
-    <div id="legend"></div>
+    <div id="legend-wrap">
+      <button id="legend-toggle">🚇 线路 <span class="arrow">▲</span></button>
+      <div id="legend"></div>
+    </div>
   </div>
   <div id="panel">
     <button id="close-btn">✕</button>
