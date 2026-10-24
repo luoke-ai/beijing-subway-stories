@@ -1,147 +1,144 @@
-// 北京地铁站名故事 · 交互逻辑
+// 北京地铁站名故事 · Leaflet 真实地图版
 (function(){
-  const svg = document.getElementById('svg');
-  const NS = 'http://www.w3.org/2000/svg';
-
-  // ---------- 渲染 ----------
-  // 站点→线路映射
-  const stationLines = {};
-  LINES.forEach(l => l.stops.forEach(s => {
-    (stationLines[s] = stationLines[s] || []).push(l.id);
-  }));
-
-  function el(tag, attrs, parent){
-    const e = document.createElementNS(NS, tag);
-    for(const k in attrs) e.setAttribute(k, attrs[k]);
-    (parent || svg).appendChild(e);
-    return e;
+  // ---------- WGS-84 -> GCJ-02（高德底图纠偏） ----------
+  function wgs2gcj(lat, lng){
+    const a = 6378245.0, ee = 0.00669342162296594323;
+    function tLat(x, y){
+      let r = -100 + 2*x + 3*y + 0.2*y*y + 0.1*x*y + 0.2*Math.sqrt(Math.abs(x));
+      r += (20*Math.sin(6*x*Math.PI) + 20*Math.sin(2*x*Math.PI)) * 2/3;
+      r += (20*Math.sin(y*Math.PI) + 40*Math.sin(y/3*Math.PI)) * 2/3;
+      r += (160*Math.sin(y/12*Math.PI) + 320*Math.sin(y*Math.PI/30)) * 2/3;
+      return r;
+    }
+    function tLng(x, y){
+      let r = 300 + x + 2*y + 0.1*x*x + 0.1*x*y + 0.1*Math.sqrt(Math.abs(x));
+      r += (20*Math.sin(6*x*Math.PI) + 20*Math.sin(2*x*Math.PI)) * 2/3;
+      r += (20*Math.sin(x*Math.PI) + 40*Math.sin(x/3*Math.PI)) * 2/3;
+      r += (150*Math.sin(x/12*Math.PI) + 300*Math.sin(x/30*Math.PI)) * 2/3;
+      return r;
+    }
+    if (lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271) return [lat, lng];
+    let dLat = tLat(lng-105, lat-35), dLng = tLng(lng-105, lat-35);
+    const radLat = lat/180*Math.PI;
+    let magic = Math.sin(radLat); magic = 1 - ee*magic*magic;
+    const sq = Math.sqrt(magic);
+    dLat = (dLat*180) / ((a*(1-ee)) / (magic*sq) * Math.PI);
+    dLng = (dLng*180) / (a/sq*Math.cos(radLat)*Math.PI);
+    return [lat + dLat, lng + dLng];
+  }
+  const gcjCache = {};
+  function G(name){
+    if(!STATIONS[name]) return null;
+    if(!gcjCache[name]){
+      const [la, lo] = STATIONS[name];
+      gcjCache[name] = wgs2gcj(la, lo);
+    }
+    return gcjCache[name];
   }
 
-  // 线路
-  const lineGroup = el('g',{id:'lines'});
-  LINES.forEach(l=>{
-    const pts = l.stops.filter(s=>STATIONS[s]).map(s=>STATIONS[s]);
-    if(pts.length<2) return;
-    const d = 'M' + pts.map(p=>p.join(',')).join(' L');
-    el('path',{d, class:'line-path', stroke:LINE_COLORS[l.id]}, lineGroup);
-    // 线路名标签（放在线路中点）
-    const mid = pts[Math.floor(pts.length/2)];
-    el('text',{x:mid[0], y:mid[1]-10, class:'line-label', fill:LINE_COLORS[l.id]},lineGroup).textContent = LINE_NAMES[l.id];
+  // ---------- 地图初始化 ----------
+  const map = L.map('map', {zoomControl:false, minZoom:9, maxZoom:17}).setView([39.905, 116.42], 11);
+  L.control.zoom({position:'bottomright'}).addTo(map);
+  L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    subdomains:['1','2','3','4'], attribution:'© 高德地图 | 站点数据 © Wikidata (CC0)', maxZoom:17
+  }).addTo(map);
+
+  // ---------- 站点 -> 线路 ----------
+  const stationLines = {};
+  LINES.forEach(l => l.stops.forEach(s => {
+    (stationLines[s] = stationLines[s] || []).push(l);
+  }));
+  const storyOf = n => STORIES[n] || STORIES[n.replace(/站$/,'')];
+
+  // ---------- 画线路 ----------
+  const lineBounds = {};
+  LINES.forEach(l => {
+    const pts = l.stops.map(G).filter(Boolean);
+    if(pts.length < 2) return;
+    L.polyline(pts, {color:l.color, weight:4.5, opacity:.95, className:'subway-line'}).addTo(map);
+    lineBounds[l.name] = L.latLngBounds(pts);
   });
 
-  // 站点
-  const stationGroup = el('g',{id:'stations'});
-  const dotMap = {};
+  // ---------- 画站点 ----------
+  const markers = {};
   Object.keys(STATIONS).forEach(name=>{
-    const [x,y] = STATIONS[name];
-    const has = !!STORIES[name];
-    const dot = el('circle',{cx:x, cy:y, r: has?5.5:3.5, class:'station-dot'+(has?' has-story':'')}, stationGroup);
-    dot.addEventListener('click', ev=>{ ev.stopPropagation(); show(name); });
-    dot.addEventListener('mouseenter', ev=>{ if(has) tip(name, ev); });
-    dot.addEventListener('mousemove', ev=>{ if(has) tip(name, ev); });
-    dot.addEventListener('mouseleave', ()=> tipEl.style.display='none');
-    dotMap[name] = dot;
-    // 换乘站稍大
-    if(stationLines[name] && stationLines[name].length>1) dot.setAttribute('r', has?7:5);
-    // 站名标注（仅故事站和换乘站，避免过密）
-    if(has || (stationLines[name]&&stationLines[name].length>1)){
-      const t = el('text',{x:x+9, y:y+4, class:'station-name'}, stationGroup);
-      t.textContent = name;
-    }
+    const p = G(name); if(!p) return;
+    const story = storyOf(name);
+    const isTransfer = (stationLines[name]||[]).length > 1;
+    const m = L.circleMarker(p, {
+      radius: story ? 6 : (isTransfer ? 4.5 : 3),
+      color: story ? '#8a6d00' : '#1b2340',
+      weight: story ? 2.5 : 1.5,
+      fillColor: story ? '#ffd54a' : (isTransfer ? '#fff' : '#f4f6ff'),
+      fillOpacity: 1,
+      className:'station-dot'
+    }).addTo(map);
+    m.on('click', ()=> show(name));
+    m.bindTooltip(name.replace(/站$/,''), {permanent: story || isTransfer, direction:'right',
+      className:'station-label' + (story ? ' story-label' : ''), offset:[4,0]});
+    m.on('mouseover', function(){ if(!story && !isTransfer) this.openTooltip(); });
+    markers[name] = m;
   });
 
-  // 图例
+  // 缩放时控制标注密度：高缩放级别显示全部
+  function refreshLabels(){
+    const z = map.getZoom();
+    Object.keys(markers).forEach(n=>{
+      const t = markers[n].getTooltip(); if(!t) return;
+      const keep = storyOf(n) || (stationLines[n]||[]).length>1 || z>=13;
+      t.setOpacity && t.setOpacity(keep?1:0);
+      const el = t.getElement(); if(el) el.style.display = keep?'':'none';
+    });
+  }
+  map.on('zoomend', refreshLabels);
+
+  // ---------- 图例（可点击缩放到线路） ----------
   const legend = document.getElementById('legend');
-  Object.keys(LINE_NAMES).forEach(id=>{
+  LINES.forEach(l=>{
     const s = document.createElement('span');
-    s.innerHTML = `<i style="background:${LINE_COLORS[id]}"></i>${LINE_NAMES[id]}`;
+    s.innerHTML = `<i style="background:${l.color}"></i>${l.name}`;
+    s.addEventListener('click', ()=>{
+      if(lineBounds[l.name]) map.fitBounds(lineBounds[l.name].pad(0.15));
+    });
     legend.appendChild(s);
   });
 
-  // ---------- 缩放拖拽 ----------
-  let vb = {x:0,y:0,w:1400,h:1000};
-  function applyVB(){ svg.setAttribute('viewBox',`${vb.x} ${vb.y} ${vb.w} ${vb.h}`); }
-  applyVB();
-
-  let dragging=false, last=null, moved=false;
-  svg.addEventListener('mousedown', e=>{ dragging=true; moved=false; last=[e.clientX,e.clientY]; });
-  window.addEventListener('mousemove', e=>{
-    if(!dragging) return;
-    const dx=(e.clientX-last[0])*vb.w/svg.clientWidth, dy=(e.clientY-last[1])*vb.h/svg.clientHeight;
-    if(Math.abs(e.clientX-last[0])+Math.abs(e.clientY-last[1])>3) moved=true;
-    vb.x-=dx; vb.y-=dy; last=[e.clientX,e.clientY]; applyVB();
-  });
-  window.addEventListener('mouseup', ()=> dragging=false);
-  // 触屏
-  svg.addEventListener('touchstart', e=>{ if(e.touches.length===1){ dragging=true; last=[e.touches[0].clientX,e.touches[0].clientY]; } },{passive:true});
-  svg.addEventListener('touchmove', e=>{
-    if(dragging && e.touches.length===1){
-      const dx=(e.touches[0].clientX-last[0])*vb.w/svg.clientWidth, dy=(e.touches[0].clientY-last[1])*vb.h/svg.clientHeight;
-      vb.x-=dx; vb.y-=dy; last=[e.touches[0].clientX,e.touches[0].clientY]; applyVB();
-    }
-  },{passive:true});
-  svg.addEventListener('touchend', ()=> dragging=false);
-
-  svg.addEventListener('wheel', e=>{
-    e.preventDefault();
-    const k = e.deltaY>0 ? 1.15 : 0.87;
-    const rect = svg.getBoundingClientRect();
-    const mx = vb.x + (e.clientX-rect.left)/rect.width*vb.w;
-    const my = vb.y + (e.clientY-rect.top)/rect.height*vb.h;
-    vb.w*=k; vb.h*=k;
-    vb.x = mx-(mx-vb.x)*k; vb.y = my-(my-vb.y)*k;
-    applyVB();
-  }, {passive:false});
-
   // ---------- 详情面板 ----------
-  const panel=document.getElementById('panel'),
-        pLines=document.getElementById('p-lines'),
-        pName=document.getElementById('p-name'),
-        pEn=document.getElementById('p-en'),
-        pBody=document.getElementById('panel-body');
-
+  const panel=document.getElementById('panel'), pLines=document.getElementById('p-lines'),
+        pName=document.getElementById('p-name'), pBody=document.getElementById('panel-body');
+  let activeMarker = null;
   function show(name){
-    const story = STORIES[name];
-    pLines.innerHTML = (stationLines[name]||[]).map(id=>
-      `<span class="line-chip" style="background:${LINE_COLORS[id]}">${LINE_NAMES[id]}</span>`).join('');
-    pName.textContent = name;
-    pEn.textContent = story ? '' : '';
+    const story = storyOf(name);
+    pLines.innerHTML = (stationLines[name]||[]).map(l =>
+      `<span class="line-chip" style="background:${l.color}">${l.name}</span>`).join('');
+    pName.textContent = name.replace(/站$/,'');
     if(story){
       pBody.innerHTML = `<h3>名称由来</h3><p>${story.o}</p><h3>轶事</h3><p>${story.s}</p>`;
     }else{
       pBody.innerHTML = `<div class="placeholder">这个故事还在编写中…</div>`;
     }
+    if(activeMarker) activeMarker.setStyle({radius: markers[name]===activeMarker?6:activeMarker.options.radius});
     panel.classList.add('open');
-    // 移动端也打开
-    if(window.innerWidth<=800) panel.classList.add('open');
+    map.flyTo(G(name), Math.max(map.getZoom(), 13), {duration:.6});
   }
   document.getElementById('close-btn').addEventListener('click', ()=> panel.classList.remove('open'));
-  svg.addEventListener('click', ()=>{ if(!moved) panel.classList.remove('open'); });
 
   // ---------- 搜索 ----------
   const search=document.getElementById('search'), sug=document.getElementById('suggestions');
-  const tipEl=document.getElementById('tip');
-  function tip(name, ev){
-    const map=document.getElementById('map-wrap').getBoundingClientRect();
-    tipEl.textContent = name + '（点击查看故事）';
-    tipEl.style.display='block';
-    tipEl.style.left=(ev.clientX-map.left+12)+'px';
-    tipEl.style.top=(ev.clientY-map.top+12)+'px';
-  }
   search.addEventListener('input', ()=>{
-    const q=search.value.trim();
+    const q = search.value.trim();
     if(!q){ sug.style.display='none'; return; }
-    const hits=Object.keys(STATIONS).filter(n=>n.includes(q)).slice(0,8);
-    if(!hits.length){ sug.innerHTML='<div class="item">无匹配站点</div>'; sug.style.display='block'; return; }
-    sug.innerHTML = hits.map(n=>
-      `<div class="item" data-n="${n}">${n}<span class="l">${STORIES[n]?'有故事':'—'}</span></div>`).join('');
+    const hits = Object.keys(STATIONS).map(n=>({n, d:n.indexOf(q)})).filter(x=>x.d>=0)
+      .sort((a,b)=>a.d-b.d || a.n.length-b.n.length).slice(0,8);
+    if(!hits.length){ sug.innerHTML='<div class="item" style="cursor:default">无匹配站点</div>'; sug.style.display='block'; return; }
+    sug.innerHTML = hits.map(x=>
+      `<div class="item" data-n="${x.n}">${x.n.replace(/站$/,'')}<span class="l">${storyOf(x.n)?'有故事':'—'}</span></div>`).join('');
     sug.style.display='block';
-    [...sug.children].forEach(it=> it.addEventListener('click', ()=>{
-      const n=it.getAttribute('data-n'); sug.style.display='none'; search.value=n; show(n);
-      // 视图飞到该站
-      const [x,y]=STATIONS[n];
-      vb.w=400; vb.h=300; vb.x=x-200; vb.y=y-150; applyVB();
+    [...sug.querySelectorAll('.item')].forEach(it=> it.addEventListener('click', ()=>{
+      sug.style.display='none'; show(it.getAttribute('data-n'));
     }));
   });
-  document.addEventListener('click', e=>{ if(!sug.contains(e.target)&&e.target!==search) sug.style.display='none'; });
+  document.addEventListener('click', e=>{ if(!sug.contains(e.target) && e.target!==search) sug.style.display='none'; });
+
+  refreshLabels();
 })();
